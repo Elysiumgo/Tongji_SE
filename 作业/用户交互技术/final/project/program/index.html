@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <title>AR Planet Blind Box Final Version - Dashboard</title>
+    <script src="https://aframe.io/releases/1.0.4/aframe.min.js"></script>
+    <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    
+    <style>
+        /* 核心修复：背景转移至 html，防止 z-index 冲突 */
+        html {
+            width: 100%;
+            height: 100%;
+            background: #050814;
+        }
+
+        body {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: transparent !important; /* 保持透明，让底层全屏摄像头穿透显示 */
+            color: #fff;
+        }
+
+        /* 右侧数据面板：作为一个实体科技感遮罩，盖在全屏 AR 的右侧 */
+        .right-dashboard {
+            position: fixed;
+            right: 0;
+            top: 0;
+            width: 35%;
+            height: 100%;
+            background: linear-gradient(180deg, #0a0f1d 0%, #070a14 100%);
+            border-left: 2px solid #00a8ff;
+            box-shadow: -10px 0 30px rgba(0, 168, 255, 0.4);
+            box-sizing: border-box;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            overflow-y: auto;
+            z-index: 1010; /* 必须在高层级 */
+        }
+
+        /* 左侧操作面板：完美定位于左侧 65% 视窗的正中上方 */
+        .ui-panel {
+            position: fixed;
+            top: 20px;
+            left: 32.5%;
+            transform: translateX(-50%);
+            z-index: 9999; /* 必须在高层级 */
+            background: rgba(10, 15, 30, .9);
+            padding: 15px;
+            border-radius: 20px;
+            border: 2px solid #00a8ff;
+            text-align: center;
+            min-width: 320px;
+            box-shadow: 0 10px 25px rgba(0, 168, 255, .4);
+            backdrop-filter: blur(5px);
+        }
+
+        .btn-group {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        button {
+            color: white;
+            border: none;
+            padding: 10px 18px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+            transition: transform 0.2s, filter 0.2s;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            filter: brightness(1.1);
+        }
+
+        .btn-open { background: linear-gradient(135deg, #00a8ff, #00c4ff); }
+        .btn-poke { background: linear-gradient(135deg, #ff9f43, #ff6b6b); }
+        .btn-scan { background: linear-gradient(135deg, #00cb84, #02aab0); }
+
+        #status-text {
+            margin-top: 10px;
+            color: #00c4ff;
+            font-weight: bold;
+            font-size: 14px;
+        }
+
+        #data-panel {
+            display: none;
+            margin-top: 10px;
+            padding: 12px;
+            background: rgba(0, 168, 255, 0.1);
+            border: 1px solid #00a8ff;
+            border-radius: 10px;
+            text-align: left;
+            color: #dff9ff;
+            font-size: 13px;
+        }
+
+        .data-row span { color: #00c4ff; font-weight: bold; }
+
+        .section-title {
+            font-size: 16px;
+            color: #00c4ff;
+            border-left: 4px solid #00cb84;
+            padding-left: 10px;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .panel-box {
+            background: rgba(16, 24, 48, 0.6);
+            border: 1px solid rgba(0, 168, 255, 0.2);
+            border-radius: 12px;
+            padding: 15px;
+        }
+
+        .progress-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+            text-align: left;
+        }
+
+        .progress-table th, .progress-table td {
+            padding: 10px 8px;
+            border-bottom: 1px solid rgba(0, 168, 255, 0.1);
+        }
+
+        .progress-table th {
+            color: #00c4ff;
+            font-weight: 600;
+        }
+
+        .badge {
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: bold;
+        }
+        .badge-ssr { background: #ff4757; color: white; box-shadow: 0 0 8px #ff4757; }
+        .badge-sr { background: #ffa502; color: white; }
+        .badge-r { background: #1e90ff; color: white; }
+        .badge-n { background: #747d8c; color: white; }
+
+        .status-tag { font-weight: bold; }
+        .status-unlocked { color: #2ed573; }
+        .status-locked { color: #57606f; }
+
+        .chart-container {
+            width: 100%;
+            height: 180px; 
+        }
+    </style>
+</head>
+
+<body>
+
+    <audio id="bg-sound" src="ambient.mp3" loop preload="auto"></audio>
+    <audio id="poke-sound" src="poke.ogg" preload="auto"></audio>
+    <audio id="scan-sound" src="scan.mp3" preload="auto"></audio>
+
+    <div class="ui-panel">
+        <div id="box-btns" class="btn-group">
+                <button class="btn-open" onclick="drawPlanetBox()">🚀 Open Cosmic Box</button>
+        </div>
+
+        <div id="planet-btns" class="btn-group" style="display:none;">
+            <button class="btn-poke" onclick="pokePlanet()">👈 Poke Planet</button>
+            <button class="btn-scan" onclick="scanPlanet()">🔍 Scan Data</button>              
+            <button class="btn-open" onclick="drawPlanetBox()">🚀 Next Box</button>
+        </div>
+        <div id="status-text">Ready! Scan Hiro Marker and open the box.</div>
+
+        <div id="data-panel">
+            <div class="data-row"><span>Type: </span><span id="data-type" style="color:white"></span></div>
+            <div class="data-row"><span>Radius: </span><span id="data-radius" style="color:white"></span></div>                    
+            <div class="data-row"><span>Features: </span><span id="data-feature" style="color:white"></span></div>
+        </div>
+    </div>
+
+    <div class="right-dashboard">
+        <h2 style="margin: 0 0 5px 0; color: #fff; font-size: 20px;">🌌 Cosmic Station</h2>
+        <p style="margin: 0 0 10px 0; color: #747d8c; font-size: 12px;">Real-time planetary archive telemetry</p>
+            
+        <div class="panel-box">
+            <div class="section-title">Collection Progress</div>
+            <table class="progress-table">
+                <thead>
+                    <tr>
+                        <th>Planet</th>
+                        <th>Rarity</th>
+                        <th>Count</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Earth</td>
+                        <td><span class="badge badge-ssr">SSR</span></td>
+                        <td id="count-earth">0</td>
+                        <td id="status-earth" class="status-tag status-locked">Locked</td>
+                    </tr>
+                    <tr>
+                        <td>Saturn</td>
+                        <td><span class="badge badge-sr">SR</span></td>
+                        <td id="count-saturn">0</td>
+                        <td id="status-saturn" class="status-tag status-locked">Locked</td>
+                    </tr>
+                    <tr>
+                        <td>Jupiter</td>
+                        <td><span class="badge badge-r">R</span></td>
+                        <td id="count-jupiter">0</td>
+                        <td id="status-jupiter" class="status-tag status-locked">Locked</td>
+                    </tr>
+                    <tr>
+                        <td>Mars</td>
+                        <td><span class="badge badge-n">N</span></td>
+                        <td id="count-mars">0</td>
+                        <td id="status-mars" class="status-tag status-locked">Locked</td>
+                    </tr>
+                    <tr>
+                        <td>Uranus</td>
+                        <td><span class="badge badge-n">N</span></td>
+                        <td id="count-uranus">0</td>
+                        <td id="status-uranus" class="status-tag status-locked">Locked</td>
+                    </tr>
+                    <tr>
+                        <td>Neptune</td>
+                        <td><span class="badge badge-n">N</span></td>
+                        <td id="count-neptune">0</td>
+                        <td id="status-neptune" class="status-tag status-locked">Locked</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="panel-box">
+            <div class="section-title">Probability Distribution</div>
+            <div id="pie-chart" class="chart-container"></div>
+        </div>
+
+        <div class="panel-box">
+            <div class="section-title">Cosmic Energy Wave</div>                
+            <div id="line-chart" class="chart-container"></div>
+        </div>
+    </div>
+
+    <a-scene renderer="antialias:true; logarithmicDepthBuffer: true;" arjs="sourceType:webcam; debugUIEnabled:false;">
+        <a-assets>                    
+            <img id="earthTex" src="earth.jpg">
+            <img id="marsTex" src="mars.jpg">
+            <img id="jupiterTex" src="jupiter.jpg">
+            <img id="saturnTex" src="saturn.jpg">
+            <img id="uranusTex" src="uranus.jpg">
+            <img id="neptuneTex" src="neptune.jpg">
+        </a-assets>
+
+        <a-marker preset="hiro" id="hiro-marker">
+            <a-entity light="type:ambient;intensity:1.2"></a-entity>
+            <a-entity light="type:directional; intensity:1.8; position:2 4 3"> </a-entity>
+
+            <a-entity id="prize-container" position="0 0.6 0"
+                animation="property:rotation; to:0 360 0; loop:true; dur:12000; easing:linear">
+
+                <a-entity id="state-giftbox" visible="true" position="0 0 0"
+                    animation="property: position; from: 0 0 0; to: 0 0.2 0; dur: 800; loop: true; dir: alternate; easing: easeInOutSine">
+                    <a-box scale="0.7 0.7 0.7" color="#111827"></a-box>
+                    <a-box scale="0.72 0.72 0.05" color="#00a8ff"></a-box>
+                    <a-box scale="0.05 0.72 0.72" color="#00a8ff"></a-box>
+                </a-entity>
+
+                <a-entity id="planet-earth" visible="false" animation__poke="property: scale; from: 1 1 1; to: 1.25 1.25 1.25; dur: 250; dir: alternate; loop: 2; startEvents: do-poke">
+                    <a-sphere radius="0.45" material="src:#earthTex; roughness: 0.4;"></a-sphere>
+                    <a-sphere radius="0.47" material="color:#bce6ff; opacity:0.15; transparent:true"></a-sphere>
+                </a-entity>
+                <a-entity id="planet-saturn" visible="false" animation__poke="property: scale; from: 1 1 1; to: 1.25 1.25 1.25; dur: 250; dir: alternate; loop: 2; startEvents: do-poke">
+                    <a-sphere radius="0.42" material="src:#saturnTex; roughness: 0.4;"></a-sphere>
+                    <a-ring rotation="90 0 0" radius-inner="0.55" radius-outer="0.95" material="color:#d8c08a; opacity:0.7; transparent:true; side:double"></a-ring>
+                </a-entity>
+                <a-entity id="planet-jupiter" visible="false" animation__poke="property: scale; from: 1 1 1; to: 1.25 1.25 1.25; dur: 250; dir: alternate; loop: 2; startEvents: do-poke">
+                    <a-sphere radius="0.55" material="src:#jupiterTex; roughness: 0.4;"></a-sphere>
+                </a-entity>
+                <a-entity id="planet-mars" visible="false" animation__poke="property: scale; from: 1 1 1; to: 1.25 1.25 1.25; dur: 250; dir: alternate; loop: 2; startEvents: do-poke">
+                    <a-sphere radius="0.35" material="src:#marsTex; roughness: 0.4;"></a-sphere>
+                </a-entity>
+                <a-entity id="planet-uranus" visible="false" animation__poke="property: scale; from: 1 1 1; to: 1.25 1.25 1.25; dur: 250; dir: alternate; loop: 2; startEvents: do-poke">
+                    <a-sphere radius="0.40" material="src:#uranusTex; roughness: 0.4;"></a-sphere>
+                </a-entity>
+                <a-entity id="planet-neptune" visible="false" animation__poke="property: scale; from: 1 1 1; to: 1.25 1.25 1.25; dur: 250; dir: alternate; loop: 2; startEvents: do-poke">
+                    <a-sphere radius="0.40" material="src:#neptuneTex; roughness: 0.4;"></a-sphere>
+                </a-entity>
+            </a-entity>
+        </a-marker>
+        <a-entity camera></a-entity>
+    </a-scene>
+
+    <script>
+        const rewards = [
+            { id: "#planet-earth", key: "earth", name: "🌍 SSR Earth", weight: 5, type: "Terrestrial", radius: "6,371 km", feature: "Located in the habitable zone, with abundant liquid water." },
+            { id: "#planet-saturn", key: "saturn", name: "🪐 SR Saturn", weight: 15, type: "Gas Giant", radius: "58,232 km", feature: "Features the most spectacular ring system of ice and rock." },
+            { id: "#planet-jupiter", key: "jupiter", name: "♃ R Jupiter", weight: 25, type: "Gas Giant", radius: "69,911 km", feature: "The largest planet, featuring the iconic Great Red Spot." },
+            { id: "#planet-neptune", key: "neptune", name: "🔵 Neptune", weight: 20, type: "Ice Giant", radius: "24,622 km", feature: "The outermost planet, characterized by supersonic winds." },
+            { id: "#planet-uranus", key: "uranus", name: "🟢 Uranus", weight: 15, type: "Ice Giant", radius: "25,362 km", feature: "Rotates on its side; methane gives it a blue-green color." },
+            { id: "#planet-mars", key: "mars", name: "🔴 Mars", weight: 20, type: "Terrestrial", radius: "3,389 km", feature: "Red surface rich in iron oxide; home to Olympus Mons." }
+        ];
+
+        let inventory = { earth: 0, saturn: 0, jupiter: 0, neptune: 0, uranus: 0, mars: 0 };
+        let isOpening = false;
+        let currentReward = null;
+        let bgMusicStarted = false;
+        let isMarkerFound = false;
+
+        window.addEventListener('load', () => {
+            initCharts(); 
+
+            // 核心修复：页面加载 600ms 后自动触发一次 resize 事件
+            // 强行纠正 A-Frame 的相机投影矩阵，确保首次加载时星球就是完美圆球，绝不拉伸
+            setTimeout(() => {
+                window.dispatchEvent(new Event('resize'));
+            }, 600);
+
+            const marker = document.querySelector('#hiro-marker');
+            const statusText = document.querySelector('#status-text');
+
+            marker.addEventListener('markerFound', () => {
+                isMarkerFound = true;
+                if (isOpening) {
+                    statusText.style.color = "#00c4ff"; statusText.innerText = "📦 Opening Cosmic Blind Box...";
+                } else if (currentReward) {
+                    if (document.getElementById("data-panel").style.display === "block") {
+                        statusText.style.color = "#00cb84"; statusText.innerText = "✅ Scan complete! Planetary data archived:";
+                    } else {
+                        statusText.style.color = "#00c4ff"; statusText.innerText = "🎉 DISCOVERED: " + currentReward.name;
+                    }
+                } else {
+                    statusText.style.color = "#00cb84"; statusText.innerText = "🎯 Target Acquired! Ready to interact.";
+                }
+            });
+
+            marker.addEventListener('markerLost', () => {
+                isMarkerFound = false;
+                statusText.style.color = "#ff6b6b";
+                statusText.innerText = "⚠ Marker lost! Please point camera at Hiro marker.";
+            });
+        });
+
+        function updateProgressTable(key) {
+            inventory[key] += 1; 
+            document.getElementById(`count-${key}`).innerText = inventory[key];
+            const statusEl = document.getElementById(`status-${key}`);
+            statusEl.innerText = "Unlocked";
+            statusEl.className = "status-tag status-unlocked";
+        }
+
+        function drawPlanetBox() {
+            if (!isMarkerFound) {
+                const statusText = document.querySelector("#status-text");
+                statusText.style.color = "#ff6b6b";
+                statusText.innerText = "⚠ Cannot open box! Please scan Hiro marker first.";
+                return;
+            }
+            tryStartBGM();
+            if (isOpening) return;
+            isOpening = true;
+            currentReward = null;
+
+            document.getElementById("box-btns").style.display = "none";
+            document.getElementById("planet-btns").style.display = "none";
+            document.getElementById("data-panel").style.display = "none";
+            document.querySelector("#status-text").style.color = "#00c4ff";
+            document.querySelector("#status-text").innerText = "📦 Opening Cosmic Blind Box...";
+
+            hideAll();
+            const box = document.querySelector("#state-giftbox");
+            box.setAttribute("visible", "true");
+
+            setTimeout(() => {
+                box.setAttribute("visible", "false");
+                currentReward = weightedRandom();
+                document.querySelector(currentReward.id).setAttribute("visible", "true");
+                document.querySelector("#status-text").innerText = "🎉 DISCOVERED: " + currentReward.name;
+                updateProgressTable(currentReward.key);
+                document.getElementById("planet-btns").style.display = "flex";
+                isOpening = false;
+            }, 1500);
+        }
+
+        let lineChart;
+        function initCharts() {
+            const pieChart = echarts.init(document.getElementById('pie-chart'), 'dark');
+            pieChart.setOption({
+                backgroundColor: 'transparent',
+                tooltip: { trigger: 'item', formatter: '{b} : {c}%' },
+                series: [{
+                    type: 'pie',
+                    radius: ['40%', '70%'],
+                    avoidLabelOverlap: false,
+                    itemStyle: { borderRadius: 6, borderColor: '#101830', borderWidth: 2 },
+                    label: { show: true, color: '#a4b0be', fontSize: 11 },
+                    data: [
+                        { value: 5, name: 'Earth', itemStyle: {color: '#ff4757'} },
+                        { value: 15, name: 'Saturn', itemStyle: {color: '#ffa502'} },
+                        { value: 25, name: 'Jupiter', itemStyle: {color: '#1e90ff'} },
+                        { value: 20, name: 'Neptune', itemStyle: {color: '#9c27b0'} },
+                        { value: 15, name: 'Uranus', itemStyle: {color: '#00cb84'} },
+                        { value: 20, name: 'Mars', itemStyle: {color: '#ff6b6b'} }
+                    ]
+                }]
+            });
+
+            lineChart = echarts.init(document.getElementById('line-chart'), 'dark');
+            lineChart.setOption({
+                backgroundColor: 'transparent',
+                grid: { left: '10%', right: '5%', top: '15%', bottom: '20%' },
+                xAxis: { type: 'category', data: ['1s', '2s', '3s', '4s', '5s', '6s'], axisLine: {show: false} },
+                yAxis: { type: 'value', splitLine: { lineStyle: { color: 'rgba(0,168,255,0.1)' } } },
+                series: [{
+                    data: [120, 182, 150, 232, 190, 290],
+                    type: 'line',
+                    smooth: true,
+                    lineStyle: { width: 3, color: '#00c4ff' },
+                    areaStyle: {
+                        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                            { offset: 0, color: 'rgba(0,196,255,0.4)' },
+                            { offset: 1, color: 'rgba(0,196,255,0)' }
+                        ])
+                    }
+                }]
+            });
+
+            setInterval(() => {
+                if(!lineChart) return;
+                let randomData = Array.from({length: 6}, () => Math.floor(Math.random() * 200 + 100));
+                lineChart.setOption({ series: [{ data: randomData }] });
+            }, 2000);
+
+            window.addEventListener('resize', () => {
+                pieChart.resize();
+                lineChart.resize();
+            });
+        }
+
+        function tryStartBGM() { if (!bgMusicStarted) { try { const bgSound = document.getElementById("bg-sound"); bgSound.volume = 0.3; bgSound.play().then(() => bgMusicStarted = true).catch(() => { }); } catch (e) { } } }
+        function hideAll() { rewards.forEach(r => document.querySelector(r.id).setAttribute("visible", "false")); }
+        function weightedRandom() { let total = 0; for (let r of rewards) total += r.weight; let random = Math.random() * total; for (let r of rewards) { if (random < r.weight) return r; random -= r.weight; } return rewards[0]; }
+        function pokePlanet() { if (!isMarkerFound) { document.querySelector("#status-text").style.color = "#ff6b6b"; document.querySelector("#status-text").innerText = "⚠ Cannot interact! Marker not detected."; return; } if (!currentReward) return; try { const pokeSound = document.getElementById("poke-sound"); pokeSound.currentTime = 0; pokeSound.play().catch(() => { }); } catch (e) { } const planetEl = document.querySelector(currentReward.id); planetEl.emit('do-poke', null, false); }
+        function scanPlanet() { if (!isMarkerFound) { document.querySelector("#status-text").style.color = "#ff6b6b"; document.querySelector("#status-text").innerText = "⚠ Cannot scan! Marker not detected."; return; } if (!currentReward) return; document.getElementById("planet-btns").style.display = "none"; document.getElementById("data-panel").style.display = "none"; try { const scanSound = document.getElementById("scan-sound"); scanSound.currentTime = 0; scanSound.play().catch(() => { }); } catch (e) { } const statusText = document.querySelector("#status-text"); statusText.style.color = "#ff9f43"; statusText.innerText = "📡 Parsing planetary data, please wait..."; setTimeout(() => { document.getElementById("data-type").innerText = currentReward.type; document.getElementById("data-radius").innerText = currentReward.radius; document.getElementById("data-feature").innerText = currentReward.feature; statusText.style.color = "#00cb84"; statusText.innerText = "✅ Scan complete! Planetary data archived:"; document.getElementById("data-panel").style.display = "block"; document.getElementById("planet-btns").style.display = "flex"; }, 1200); }
+    </script>
+</body>
+
+</html>
